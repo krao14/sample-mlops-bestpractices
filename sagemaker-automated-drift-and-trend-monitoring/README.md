@@ -4,7 +4,7 @@
 
 ![MLOps Architecture](docs/guides/MetaMonitoring.png)
 
-> **11-Step End-to-End Flow**: This architecture shows the complete MLOps pipeline from data ingestion through training, deployment, inference monitoring, and governance. See [ARCHITECTURE_STEPS.md](docs/ARCHITECTURE_STEPS.md) for detailed descriptions of each numbered step.
+> **End-to-End Flow**: This architecture shows the complete MLOps pipeline from data ingestion through training, deployment, inference monitoring, and governance. See [ARCHITECTURE_STEPS.md](docs/ARCHITECTURE_STEPS.md) for detailed descriptions of each numbered step.
 
 ## Quickstart: Implementation Steps
 
@@ -23,27 +23,98 @@ Follow these steps to implement the 11-step architecture shown above. Each step 
 
 **Use this if you DON'T have an existing SageMaker domain.**
 
-Deploy the provided CloudFormation template to create all required infrastructure:
+**Prerequisites: AWS Authentication**
 
+Before deploying, authenticate with AWS using one of these methods:
+
+**Option 1: AWS SSO (Recommended)**
+```bash
+aws sso login --profile default
+export AWS_PROFILE=default
+```
+
+**Option 2: Export AWS Credentials**
+```bash
+export AWS_ACCESS_KEY_ID=your-access-key
+export AWS_SECRET_ACCESS_KEY=your-secret-key
+export AWS_SESSION_TOKEN=your-session-token  # If using temporary credentials
+```
+
+**Option 3: AWS CLI Configure**
+```bash
+aws configure
+# Enter your Access Key ID, Secret Access Key, Region, and output format
+```
+
+**Deploy the CloudFormation template:**
+
+For **us-east-1** (default):
 ```bash
 aws cloudformation create-stack \
-  --stack-name fraud-detection-sagemaker-setup \
+  --stack-name fraud-detection-monitoring \
   --template-body file://cloudformation/sagemaker-mlflow-setup.yaml \
-  --parameters ParameterKey=ProjectName,ParameterValue=fraud-detection-monitoring \
   --capabilities CAPABILITY_NAMED_IAM
 ```
 
-**What gets created:**
-- VPC with public/private subnets and NAT Gateway
-- SageMaker Domain with user profile
-- MLflow Tracking Server for experiment tracking
-- JupyterLab Space pre-configured with Data Science image
-- S3 Bucket for data storage
-- Execution Role with all required permissions
-
-**Wait for completion** (~15-20 minutes):
+For **us-west-2** (or other regions):
 ```bash
-aws cloudformation wait stack-create-complete --stack-name fraud-detection-sagemaker-setup
+aws cloudformation create-stack \
+  --stack-name fraud-detection-monitoring \
+  --template-body file://cloudformation/sagemaker-mlflow-setup.yaml \
+  --region us-west-2 \
+  --capabilities CAPABILITY_NAMED_IAM
+```
+
+**If you have existing resources** from a previous failed stack (avoids deletion issues):
+```bash
+aws cloudformation create-stack \
+  --stack-name fraud-detection-monitoring \
+  --template-body file://cloudformation/sagemaker-mlflow-setup.yaml \
+  --region us-west-2 \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameters ParameterKey=UseExistingBucket,ParameterValue=true \
+               ParameterKey=UseExistingRole,ParameterValue=true \
+               ParameterKey=UseExistingVPC,ParameterValue=true \
+               ParameterKey=ExistingVPCId,ParameterValue=vpc-xxxxx \
+               ParameterKey=ExistingSubnet1Id,ParameterValue=subnet-xxxxx \
+               ParameterKey=ExistingSubnet2Id,ParameterValue=subnet-yyyyy \
+               ParameterKey=ExistingSecurityGroupId,ParameterValue=sg-xxxxx
+```
+**Note:** Using existing VPC/subnets prevents the slow subnet deletion issue (ENIs can take 10-15 min to detach).
+
+**Available regions:** us-east-1, us-east-2, us-west-1, us-west-2, eu-west-1, eu-central-1, ap-southeast-1, ap-southeast-2, ap-northeast-1
+
+**What gets created:**
+- ✅ **Minimal VPC** with 2 public subnets (no NAT Gateway = $32/month saved!)
+- ✅ **Internet Gateway** for direct internet access
+- ✅ **SageMaker Domain** in VPC with public subnet routing
+- ✅ **User Profile** with JupyterLab settings
+- ✅ **JupyterLab Space** pre-configured with Data Science 3.10 image
+- ✅ **MLflow Tracking Server** for experiment tracking
+- ✅ **S3 Bucket** for data storage (with automatic cleanup on deletion)
+- ✅ **IAM Execution Role** with all required permissions
+- ✅ **Lifecycle Configuration** that auto-clones repo and creates `.env`
+- ✅ **Lambda Function** to empty S3 bucket on stack deletion
+
+See `cloudformation/README_SIMPLIFIED_TEMPLATE.md` for detailed architecture explanation.
+
+**Wait for completion** (~5-10 minutes):
+```bash
+# For default region
+aws cloudformation wait stack-create-complete --stack-name fraud-detection-monitoring
+
+# For specific region (e.g., us-west-2)
+aws cloudformation wait stack-create-complete \
+  --stack-name fraud-detection-monitoring \
+  --region us-west-2
+```
+
+**Get stack outputs:**
+```bash
+aws cloudformation describe-stacks \
+  --stack-name fraud-detection-monitoring \
+  --query 'Stacks[0].Outputs' \
+  --output table
 ```
 
 **Automatic repository setup:** The CloudFormation stack includes a Lifecycle Configuration that runs when you launch the JupyterLab space and automatically:
@@ -52,9 +123,35 @@ aws cloudformation wait stack-create-complete --stack-name fraud-detection-sagem
 3. ✅ Creates `CLOUDFORMATION_SETUP_COMPLETE.md` with next steps
 
 **Access JupyterLab:**
-Navigate to **SageMaker Console → Domains → fraud-detection-monitoring-domain → User: fraud-detection-user → Launch → Space: fraud-detection-monitoring-jupyter-space**
+Navigate to **SageMaker Console → Domains → fraud-detection-monitoring-domain → User: fraud-detection-user → Spaces → fraud-detection-monitoring-jupyter-space → Click "Run Space"**
 
 Once launched, notebooks and `.env` are ready to use immediately.
+
+**Update the stack** (if you need to make changes):
+```bash
+aws cloudformation update-stack \
+  --stack-name fraud-detection-monitoring \
+  --template-body file://cloudformation/sagemaker-mlflow-setup.yaml \
+  --capabilities CAPABILITY_NAMED_IAM
+```
+
+**Delete the stack** (removes ALL resources automatically):
+```bash
+# Stop all JupyterLab apps first
+aws sagemaker list-apps --domain-id <domain-id>
+
+# Then delete the stack
+aws cloudformation delete-stack --stack-name fraud-detection-monitoring
+
+# Wait for deletion to complete
+aws cloudformation wait stack-delete-complete --stack-name fraud-detection-monitoring
+```
+
+**Note:** The CloudFormation template includes automatic cleanup. When you delete the stack:
+- Lambda automatically empties the S3 bucket
+- All resources are deleted in the correct order
+- No manual cleanup required
+- See `cloudformation/DELETION_POLICY_SUMMARY.md` for details
 
 ---
 
@@ -231,7 +328,7 @@ A ** Open-source MLOps system** that establishes automated monitoring and govern
 
 ![Inference Monitoring Process Flow](docs/guides/inference_monitoring_processflow.png)
 
-> **13-Step Detailed Flow**: This diagram shows the complete inference monitoring pipeline from real-time predictions through ground truth backfill, drift detection, and governance visualization. Each data flow is numbered and labeled for clarity.
+> **Detailed Flow**: This diagram shows the complete inference monitoring pipeline from real-time predictions through ground truth backfill, drift detection, and governance visualization. Each data flow is numbered and labeled for clarity.
 
 This detailed diagram shows the **end-to-end inference monitoring flow** with MLflow as the central monitoring interface:
 
@@ -433,6 +530,256 @@ python docs/generate_architecture_diagram.py
 python docs/generate_inference_monitoring_diagram.py
 python docs/generate_mlflow_evidently_diagram.py
 ```
+
+## CloudFormation Stack Management
+
+### Prerequisites: Authentication
+
+Before running any CloudFormation commands, authenticate with AWS:
+
+```bash
+# Option 1: AWS SSO
+aws sso login --profile default
+export AWS_PROFILE=default
+
+# Option 2: Export credentials
+export AWS_ACCESS_KEY_ID=your-access-key
+export AWS_SECRET_ACCESS_KEY=your-secret-key
+export AWS_SESSION_TOKEN=your-session-token  # If temporary
+```
+
+### Create Stack
+
+**For us-east-1 (default region):**
+
+```bash
+aws cloudformation create-stack \
+  --stack-name fraud-detection-monitoring \
+  --template-body file://cloudformation/sagemaker-mlflow-setup.yaml \
+  --capabilities CAPABILITY_NAMED_IAM
+
+# Wait for completion (~5-10 minutes)
+aws cloudformation wait stack-create-complete --stack-name fraud-detection-monitoring
+```
+
+**For us-west-2 (or any specific region):**
+
+```bash
+aws cloudformation create-stack \
+  --stack-name fraud-detection-monitoring \
+  --template-body file://cloudformation/sagemaker-mlflow-setup.yaml \
+  --region us-west-2 \
+  --capabilities CAPABILITY_NAMED_IAM
+
+# Wait for completion
+aws cloudformation wait stack-create-complete \
+  --stack-name fraud-detection-monitoring \
+  --region us-west-2
+```
+
+**Default parameters:**
+- ProjectName: `fraud-detection-monitoring`
+- UserProfileName: `fraud-detection-user`
+- JupyterLabInstance: `ml.t3.medium`
+- GitHubRepo: `https://github.com/aws-samples/sample-mlops-bestpractices.git`
+- UseExistingBucket: `false` (set to `true` if S3 bucket already exists)
+
+**If S3 bucket already exists** (from failed deployment):
+
+```bash
+aws cloudformation create-stack \
+  --stack-name fraud-detection-monitoring \
+  --template-body file://cloudformation/sagemaker-mlflow-setup.yaml \
+  --region us-west-2 \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameters ParameterKey=UseExistingBucket,ParameterValue=true
+```
+
+**To customize parameters (example with us-west-2):**
+
+```bash
+aws cloudformation create-stack \
+  --stack-name fraud-detection-monitoring \
+  --template-body file://cloudformation/sagemaker-mlflow-setup.yaml \
+  --region us-west-2 \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameters \
+    ParameterKey=ProjectName,ParameterValue=my-custom-project \
+    ParameterKey=JupyterLabInstance,ParameterValue=ml.t3.large
+```
+
+**What gets created:**
+- Minimal VPC with 2 public subnets and Internet Gateway (no NAT Gateway!)
+- SageMaker Domain in VPC with direct internet access
+- User Profile with JupyterLab configuration
+- JupyterLab Space with automatic repo clone
+- MLflow Tracking Server
+- S3 Bucket with versioning and encryption
+- IAM Execution Role with necessary permissions
+- Lifecycle Config for environment setup
+- Lambda Function for S3 cleanup on deletion
+
+### View Stack Outputs
+
+```bash
+# View all outputs in table format (default region)
+aws cloudformation describe-stacks \
+  --stack-name fraud-detection-monitoring \
+  --query 'Stacks[0].Outputs' \
+  --output table
+
+# For specific region (e.g., us-west-2)
+aws cloudformation describe-stacks \
+  --stack-name fraud-detection-monitoring \
+  --region us-west-2 \
+  --query 'Stacks[0].Outputs' \
+  --output table
+
+# Get MLflow tracking server URL (add --region if needed)
+aws sagemaker describe-mlflow-tracking-server \
+  --tracking-server-name fraud-detection-monitoring-mlflow \
+  --region us-west-2 \
+  --query 'TrackingServerUrl' \
+  --output text
+
+# Get Domain ID
+aws cloudformation describe-stacks \
+  --stack-name fraud-detection-monitoring \
+  --query 'Stacks[0].Outputs[?OutputKey==`SageMakerDomainId`].OutputValue' \
+  --output text
+```
+
+### Update Stack
+
+Update the template (keeps existing parameters):
+
+```bash
+aws cloudformation update-stack \
+  --stack-name fraud-detection-monitoring \
+  --template-body file://cloudformation/sagemaker-mlflow-setup.yaml \
+  --capabilities CAPABILITY_NAMED_IAM
+
+# Wait for update to complete
+aws cloudformation wait stack-update-complete --stack-name fraud-detection-monitoring
+```
+
+**To change instance size:**
+
+```bash
+aws cloudformation update-stack \
+  --stack-name fraud-detection-monitoring \
+  --template-body file://cloudformation/sagemaker-mlflow-setup.yaml \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameters \
+    ParameterKey=JupyterLabInstance,ParameterValue=ml.t3.large \
+    ParameterKey=ProjectName,UsePreviousValue=true \
+    ParameterKey=UserProfileName,UsePreviousValue=true \
+    ParameterKey=GitHubRepo,UsePreviousValue=true
+```
+
+### Delete Stack
+
+Complete cleanup with automatic S3 bucket emptying:
+
+```bash
+# 1. First, stop all running apps (required before deletion)
+DOMAIN_ID=$(aws cloudformation describe-stacks \
+  --stack-name fraud-detection-monitoring \
+  --query 'Stacks[0].Outputs[?OutputKey==`SageMakerDomainId`].OutputValue' \
+  --output text)
+
+# List all apps
+aws sagemaker list-apps --domain-id $DOMAIN_ID
+
+# Stop JupyterLab app if running
+aws sagemaker delete-app \
+  --domain-id $DOMAIN_ID \
+  --user-profile-name fraud-detection-user \
+  --app-type JupyterLab \
+  --app-name default
+
+# 2. Delete the CloudFormation stack (automatic cleanup)
+aws cloudformation delete-stack --stack-name fraud-detection-monitoring
+
+# 3. Wait for deletion to complete (~5-10 minutes)
+aws cloudformation wait stack-delete-complete --stack-name fraud-detection-monitoring
+```
+
+**Automatic Cleanup:**
+- ✅ Lambda waits for ENIs to be detached from subnets (prevents subnet deletion errors)
+- ✅ Lambda empties S3 bucket (all objects and versions)
+- ✅ All resources deleted in correct dependency order
+- ✅ No manual cleanup required
+- 📖 See `cloudformation/DELETION_POLICY_SUMMARY.md` for details
+- 📖 See `cloudformation/ENI_CLEANUP_EXPLANATION.md` for ENI cleanup details
+
+### Troubleshooting Stack Operations
+
+**Stack creation failed:**
+```bash
+# Get detailed failure reason
+aws cloudformation describe-stack-events \
+  --stack-name fraud-detection-monitoring \
+  --query 'StackEvents[?ResourceStatus==`CREATE_FAILED`]' \
+  --output table
+```
+
+**Stack deletion stuck (subnet dependency error):**
+
+The template includes automatic ENI cleanup, but if deletion still fails:
+
+```bash
+# Use the automated fix script
+cd cloudformation
+./FIX_STACK_DELETION.sh
+```
+
+Or manually:
+```bash
+# Check for apps that need to be stopped
+aws sagemaker list-apps --domain-id <domain-id>
+
+# Force delete apps
+aws sagemaker delete-app --domain-id <domain-id> \
+  --user-profile-name <user-profile-name> \
+  --app-type JupyterLab \
+  --app-name default
+
+# Check for ENIs blocking subnet deletion
+aws ec2 describe-network-interfaces \
+  --filters "Name=subnet-id,Values=<subnet-id>" \
+  --query 'NetworkInterfaces[*].[NetworkInterfaceId,Status,Description]' \
+  --output table
+
+# Wait 5-10 minutes for ENIs to clean up, then retry
+aws cloudformation delete-stack --stack-name fraud-detection-monitoring
+```
+
+**Check stack status:**
+```bash
+aws cloudformation describe-stacks \
+  --stack-name fraud-detection-monitoring \
+  --query 'Stacks[0].StackStatus' \
+  --output text
+```
+
+### Cost Optimization
+
+The simplified template uses minimal VPC infrastructure:
+- ✅ Public subnets with Internet Gateway (no NAT Gateway = Save ~$32/month)
+- ✅ Direct internet access for JupyterLab (no NAT data transfer charges)
+- ✅ Pay only for JupyterLab compute when running
+- ✅ Automatic resource cleanup prevents orphaned costs
+
+**Estimated Monthly Costs:**
+- VPC & Subnets: $0 (free tier)
+- Internet Gateway: $0 (no charge for IGW itself)
+- Data Transfer: ~$0.09/GB outbound (minimal for typical use)
+- SageMaker Domain: $0 (pay only for apps)
+- JupyterLab (ml.t3.medium): ~$0.05/hour when running
+- MLflow Tracking Server: ~$2-5/month
+- S3 Storage: ~$0.023/GB/month
+- **Total: ~$5-10/month for light usage** (vs $40-60/month with NAT Gateway)
 
 ## Quick Start
 

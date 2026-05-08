@@ -1,8 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  SageMaker Domain setup for Automated Drift and Trend Monitoring solution.
-  Creates: VPC with private subnets, SageMaker Domain, MLflow Tracking Server,
-  Execution Role, JupyterLab Space, and S3 bucket for data storage.
+  Simplified SageMaker Domain setup for Automated Drift and Trend Monitoring.
+  Creates: SageMaker Domain (PublicInternetOnly), MLflow Tracking Server,
+  JupyterLab Space with repo clone, S3 bucket, and IAM execution role.
 
 Parameters:
   ProjectName:
@@ -11,30 +11,6 @@ Parameters:
     Description: 'Project name (lowercase letters, numbers, hyphens only)'
     AllowedPattern: '^[a-z0-9-]+$'
     ConstraintDescription: 'Must contain only lowercase letters, numbers, and hyphens'
-
-  VpcCIDR:
-    Type: String
-    Default: 10.0.0.0/16
-    Description: CIDR block for VPC
-    AllowedPattern: '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$'
-
-  PrivateSubnet1CIDR:
-    Type: String
-    Default: 10.0.1.0/24
-    Description: CIDR block for private subnet 1
-    AllowedPattern: '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$'
-
-  PrivateSubnet2CIDR:
-    Type: String
-    Default: 10.0.2.0/24
-    Description: CIDR block for private subnet 2 (required for MLflow)
-    AllowedPattern: '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$'
-
-  PublicSubnetCIDR:
-    Type: String
-    Default: 10.0.3.0/24
-    Description: CIDR block for public subnet (NAT Gateway)
-    AllowedPattern: '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$'
 
   UserProfileName:
     Type: String
@@ -49,57 +25,89 @@ Parameters:
     AllowedValues:
       - ml.t3.medium
       - ml.t3.large
+      - ml.t3.xlarge
       - ml.m5.large
       - ml.m5.xlarge
-      - ml.m5.2xlarge
+
+  GitHubRepo:
+    Type: String
+    Default: 'https://github.com/aws-samples/sample-mlops-bestpractices.git'
+    Description: GitHub repository URL to clone
+
+  UseExistingBucket:
+    Type: String
+    Default: 'false'
+    Description: 'Set to true to use existing S3 bucket instead of creating new one'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  UseExistingRole:
+    Type: String
+    Default: 'false'
+    Description: 'Set to true to use existing IAM role instead of creating new one'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  UseExistingVPC:
+    Type: String
+    Default: 'false'
+    Description: 'Set to true to use existing VPC and subnets instead of creating new ones'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  ExistingVPCId:
+    Type: String
+    Default: ''
+    Description: 'Existing VPC ID (required if UseExistingVPC=true)'
+
+  ExistingSubnet1Id:
+    Type: String
+    Default: ''
+    Description: 'Existing Subnet 1 ID (required if UseExistingVPC=true)'
+
+  ExistingSubnet2Id:
+    Type: String
+    Default: ''
+    Description: 'Existing Subnet 2 ID (required if UseExistingVPC=true)'
+
+  ExistingSecurityGroupId:
+    Type: String
+    Default: ''
+    Description: 'Existing Security Group ID (optional if UseExistingVPC=true, will create new if empty)'
+
+Conditions:
+  CreateNewBucket: !Equals [!Ref UseExistingBucket, 'false']
+  CreateNewRole: !Equals [!Ref UseExistingRole, 'false']
+  CreateNewVPC: !Equals [!Ref UseExistingVPC, 'false']
+  CreateNewSecurityGroup: !Or
+    - !Equals [!Ref UseExistingVPC, 'false']
+    - !Equals [!Ref ExistingSecurityGroupId, '']
 
 Resources:
   # ====================================================================
-  # Network Infrastructure
+  # VPC - Minimal Configuration for SageMaker (No NAT Gateway)
   # ====================================================================
   VPC:
     Type: AWS::EC2::VPC
+    Condition: CreateNewVPC
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
-      CidrBlock: !Ref VpcCIDR
-      EnableDnsSupport: true
+      CidrBlock: 10.0.0.0/16
       EnableDnsHostnames: true
+      EnableDnsSupport: true
       Tags:
         - Key: Name
           Value: !Sub '${ProjectName}-vpc'
 
-  PrivateSubnet1:
-    Type: AWS::EC2::Subnet
-    Properties:
-      CidrBlock: !Ref PrivateSubnet1CIDR
-      VpcId: !Ref VPC
-      AvailabilityZone: !Select [0, !GetAZs '']
-      Tags:
-        - Key: Name
-          Value: !Sub '${ProjectName}-private-subnet-1'
-
-  PrivateSubnet2:
-    Type: AWS::EC2::Subnet
-    Properties:
-      CidrBlock: !Ref PrivateSubnet2CIDR
-      VpcId: !Ref VPC
-      AvailabilityZone: !Select [1, !GetAZs '']
-      Tags:
-        - Key: Name
-          Value: !Sub '${ProjectName}-private-subnet-2'
-
-  PublicSubnet:
-    Type: AWS::EC2::Subnet
-    Properties:
-      CidrBlock: !Ref PublicSubnetCIDR
-      VpcId: !Ref VPC
-      AvailabilityZone: !Select [0, !GetAZs '']
-      MapPublicIpOnLaunch: true
-      Tags:
-        - Key: Name
-          Value: !Sub '${ProjectName}-public-subnet'
-
   InternetGateway:
     Type: AWS::EC2::InternetGateway
+    Condition: CreateNewVPC
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       Tags:
         - Key: Name
@@ -107,30 +115,44 @@ Resources:
 
   AttachGateway:
     Type: AWS::EC2::VPCGatewayAttachment
+    Condition: CreateNewVPC
     Properties:
       VpcId: !Ref VPC
       InternetGatewayId: !Ref InternetGateway
 
-  NATGatewayEIP:
-    Type: AWS::EC2::EIP
-    DependsOn: AttachGateway
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Condition: CreateNewVPC
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
-      Domain: vpc
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-nat-eip'
+          Value: !Sub '${ProjectName}-public-subnet-1'
 
-  NATGateway:
-    Type: AWS::EC2::NatGateway
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Condition: CreateNewVPC
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
-      AllocationId: !GetAtt NATGatewayEIP.AllocationId
-      SubnetId: !Ref PublicSubnet
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-nat-gateway'
+          Value: !Sub '${ProjectName}-public-subnet-2'
 
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
+    Condition: CreateNewVPC
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       VpcId: !Ref VPC
       Tags:
@@ -139,51 +161,38 @@ Resources:
 
   PublicRoute:
     Type: AWS::EC2::Route
+    Condition: CreateNewVPC
     DependsOn: AttachGateway
     Properties:
       RouteTableId: !Ref PublicRouteTable
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
 
-  PublicSubnetRouteTableAssociation:
+  PublicSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: CreateNewVPC
     Properties:
       RouteTableId: !Ref PublicRouteTable
-      SubnetId: !Ref PublicSubnet
+      SubnetId: !Ref PublicSubnet1
 
-  PrivateRouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref VPC
-      Tags:
-        - Key: Name
-          Value: !Sub '${ProjectName}-private-rt'
-
-  PrivateRoute:
-    Type: AWS::EC2::Route
-    DependsOn: NATGateway
-    Properties:
-      RouteTableId: !Ref PrivateRouteTable
-      DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NATGateway
-
-  PrivateSubnet1RouteTableAssociation:
+  PublicSubnet2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: CreateNewVPC
     Properties:
-      RouteTableId: !Ref PrivateRouteTable
-      SubnetId: !Ref PrivateSubnet1
-
-  PrivateSubnet2RouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      RouteTableId: !Ref PrivateRouteTable
-      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
 
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup
+    Condition: CreateNewSecurityGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
-      GroupDescription: Security group for SageMaker Domain resources
-      VpcId: !Ref VPC
+      GroupDescription: Security group for SageMaker Domain
+      VpcId: !If
+        - CreateNewVPC
+        - !Ref VPC
+        - !Ref ExistingVPCId
       SecurityGroupEgress:
         - IpProtocol: '-1'
           CidrIp: 0.0.0.0/0
@@ -194,6 +203,7 @@ Resources:
 
   SecurityGroupIngress:
     Type: AWS::EC2::SecurityGroupIngress
+    Condition: CreateNewSecurityGroup
     Properties:
       IpProtocol: '-1'
       GroupId: !Ref SecurityGroup
@@ -201,23 +211,217 @@ Resources:
       Description: Allow traffic within security group
 
   # ====================================================================
-  # S3 Bucket for Data Storage
+  # Lambda Function to Wait for ENI Cleanup Before Subnet Deletion
+  # ====================================================================
+  WaitForENICleanupFunction:
+    Type: AWS::Lambda::Function
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      FunctionName: !Sub '${ProjectName}-wait-eni-cleanup'
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt WaitForENICleanupRole.Arn
+      Timeout: 900  # 15 minutes max
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import cfnresponse
+          import time
+
+          ec2 = boto3.client('ec2')
+
+          def handler(event, context):
+              try:
+                  subnet_ids = event['ResourceProperties'].get('SubnetIds', [])
+
+                  if event['RequestType'] == 'Delete':
+                      print(f'Waiting for ENIs to be cleaned up from subnets: {subnet_ids}')
+
+                      max_wait = 840  # 14 minutes (leave 60s for Lambda overhead)
+                      interval = 15   # Check every 15 seconds
+                      elapsed = 0
+
+                      while elapsed < max_wait:
+                          all_clear = True
+
+                          for subnet_id in subnet_ids:
+                              try:
+                                  response = ec2.describe_network_interfaces(
+                                      Filters=[{'Name': 'subnet-id', 'Values': [subnet_id]}]
+                                  )
+
+                                  eni_count = len(response['NetworkInterfaces'])
+
+                                  if eni_count > 0:
+                                      print(f'Subnet {subnet_id} still has {eni_count} ENI(s)')
+                                      all_clear = False
+
+                                      # Log ENI details for troubleshooting
+                                      for eni in response['NetworkInterfaces']:
+                                          print(f"  ENI: {eni['NetworkInterfaceId']}, "
+                                                f"Status: {eni['Status']}, "
+                                                f"Description: {eni.get('Description', 'N/A')}")
+                              except Exception as e:
+                                  print(f'Error checking subnet {subnet_id}: {str(e)}')
+
+                          if all_clear:
+                              print('✅ All ENIs have been cleaned up!')
+                              cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                              return
+
+                          print(f'Waiting... ({elapsed}/{max_wait} seconds)')
+                          time.sleep(interval)
+                          elapsed += interval
+
+                      # Timeout reached, but don't fail - CloudFormation will retry subnet deletion
+                      print(f'⚠️ Timeout reached after {max_wait} seconds, but continuing...')
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                                     {'Message': 'Timeout reached but proceeding'})
+                  else:
+                      # Create/Update - nothing to do
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+
+              except Exception as e:
+                  print(f'Error: {str(e)}')
+                  # Don't fail the stack deletion even if Lambda fails
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                                 {'Error': str(e), 'Message': 'Error occurred but continuing'})
+
+  WaitForENICleanupRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub '${ProjectName}-DescribeENIs'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeNetworkInterfaces
+                Resource: '*'
+
+  WaitForENICleanup:
+    Type: Custom::WaitForENICleanup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    DependsOn:
+      - SageMakerDomain
+      - UserProfile
+      - JupyterSpace
+    Properties:
+      ServiceToken: !GetAtt WaitForENICleanupFunction.Arn
+      SubnetIds:
+        - !If
+          - CreateNewVPC
+          - !Ref PublicSubnet1
+          - !Ref ExistingSubnet1Id
+        - !If
+          - CreateNewVPC
+          - !Ref PublicSubnet2
+          - !Ref ExistingSubnet2Id
+
+  # ====================================================================
+  # Lambda Function to Empty S3 Bucket on Stack Deletion
+  # ====================================================================
+  EmptyS3BucketFunction:
+    Type: AWS::Lambda::Function
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      FunctionName: !Sub '${ProjectName}-empty-bucket-lambda'
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt EmptyS3BucketRole.Arn
+      Timeout: 300
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import cfnresponse
+
+          s3 = boto3.resource('s3')
+
+          def handler(event, context):
+              try:
+                  bucket_name = event['ResourceProperties']['BucketName']
+
+                  if event['RequestType'] == 'Delete':
+                      print(f'Emptying bucket: {bucket_name}')
+                      bucket = s3.Bucket(bucket_name)
+
+                      # Delete all versions and delete markers
+                      bucket.object_versions.delete()
+
+                      print(f'Successfully emptied bucket: {bucket_name}')
+
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as e:
+                  print(f'Error: {str(e)}')
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
+
+  EmptyS3BucketRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub '${ProjectName}-EmptyBucketPolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:ListBucketVersions
+                  - s3:DeleteObject
+                  - s3:DeleteObjectVersion
+                Resource:
+                  - !Sub 'arn:aws:s3:::${ProjectName}-data-${AWS::AccountId}'
+                  - !Sub 'arn:aws:s3:::${ProjectName}-data-${AWS::AccountId}/*'
+
+  # ====================================================================
+  # S3 Bucket for Data Storage (Conditional Creation)
   # ====================================================================
   DataBucket:
     Type: AWS::S3::Bucket
+    Condition: CreateNewBucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       BucketName: !Sub '${ProjectName}-data-${AWS::AccountId}'
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
-      VersioningConfiguration:
-        Status: Enabled
       LifecycleConfiguration:
         Rules:
           - Id: DeleteOldVersions
@@ -227,11 +431,23 @@ Resources:
         - Key: Name
           Value: !Sub '${ProjectName}-data-bucket'
 
+  EmptyS3BucketCustomResource:
+    Type: Custom::EmptyS3Bucket
+    Condition: CreateNewBucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      ServiceToken: !GetAtt EmptyS3BucketFunction.Arn
+      BucketName: !Sub '${ProjectName}-data-${AWS::AccountId}'
+
   # ====================================================================
-  # IAM Roles
+  # IAM Execution Role (Conditional Creation)
   # ====================================================================
   SageMakerExecutionRole:
     Type: AWS::IAM::Role
+    Condition: CreateNewRole
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       RoleName: !Sub '${ProjectName}-SageMakerExecutionRole'
       AssumeRolePolicyDocument:
@@ -248,7 +464,7 @@ Resources:
         - 'arn:aws:iam::aws:policy/AmazonAthenaFullAccess'
         - 'arn:aws:iam::aws:policy/AWSGlueConsoleFullAccess'
       Policies:
-        - PolicyName: MLflowAccess
+        - PolicyName: !Sub '${ProjectName}-MLflowAccess'
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -260,44 +476,7 @@ Resources:
                   - 'sagemaker:DescribeMlflowTrackingServer'
                   - 'sagemaker:ListMlflowTrackingServers'
                 Resource: '*'
-        - PolicyName: LambdaInvoke
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 'lambda:InvokeFunction'
-                  - 'lambda:CreateFunction'
-                  - 'lambda:UpdateFunctionCode'
-                  - 'lambda:UpdateFunctionConfiguration'
-                  - 'lambda:GetFunction'
-                  - 'lambda:DeleteFunction'
-                Resource: '*'
-        - PolicyName: SQSAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 'sqs:CreateQueue'
-                  - 'sqs:DeleteQueue'
-                  - 'sqs:GetQueueAttributes'
-                  - 'sqs:SetQueueAttributes'
-                  - 'sqs:SendMessage'
-                  - 'sqs:ReceiveMessage'
-                  - 'sqs:DeleteMessage'
-                Resource: '*'
-        - PolicyName: SNSAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 'sns:CreateTopic'
-                  - 'sns:Subscribe'
-                  - 'sns:Publish'
-                Resource: '*'
-        - PolicyName: EventBridgeAccess
+        - PolicyName: !Sub '${ProjectName}-EventBridgeAccess'
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -307,8 +486,9 @@ Resources:
                   - 'events:PutTargets'
                   - 'events:DeleteRule'
                   - 'events:RemoveTargets'
+                  - 'events:DescribeRule'
                 Resource: '*'
-        - PolicyName: IAMPassRole
+        - PolicyName: !Sub '${ProjectName}-IAMPassRole'
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -319,7 +499,7 @@ Resources:
                 Condition:
                   StringEquals:
                     'iam:PassedToService': 'sagemaker.amazonaws.com'
-        - PolicyName: SageMakerImageAccess
+        - PolicyName: !Sub '${ProjectName}-SageMakerImageAccess'
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -328,6 +508,10 @@ Resources:
                   - 'sagemaker:DescribeImageVersion'
                   - 'sagemaker:DescribeImage'
                   - 'sagemaker:ListImageVersions'
+                  - 'sagemaker:DescribeApp'
+                  - 'sagemaker:DescribeSpace'
+                  - 'sagemaker:DescribeDomain'
+                  - 'sagemaker:DescribeUserProfile'
                 Resource: '*'
               - Effect: Allow
                 Action:
@@ -342,21 +526,39 @@ Resources:
           Value: !Sub '${ProjectName}-execution-role'
 
   # ====================================================================
-  # SageMaker Domain
+  # SageMaker Domain (VpcOnly with public subnets - No NAT Gateway!)
   # ====================================================================
   SageMakerDomain:
     Type: AWS::SageMaker::Domain
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       DomainName: !Sub '${ProjectName}-domain'
       AuthMode: IAM
       DefaultUserSettings:
-        ExecutionRole: !GetAtt SageMakerExecutionRole.Arn
+        ExecutionRole: !If
+          - CreateNewRole
+          - !GetAtt SageMakerExecutionRole.Arn
+          - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-SageMakerExecutionRole'
         SecurityGroups:
-          - !Ref SecurityGroup
+          - !If
+            - CreateNewSecurityGroup
+            - !Ref SecurityGroup
+            - !Ref ExistingSecurityGroupId
+      AppNetworkAccessType: VpcOnly
+      VpcId: !If
+        - CreateNewVPC
+        - !Ref VPC
+        - !Ref ExistingVPCId
       SubnetIds:
-        - !Ref PrivateSubnet1
-        - !Ref PrivateSubnet2
-      VpcId: !Ref VPC
+        - !If
+          - CreateNewVPC
+          - !Ref PublicSubnet1
+          - !Ref ExistingSubnet1Id
+        - !If
+          - CreateNewVPC
+          - !Ref PublicSubnet2
+          - !Ref ExistingSubnet2Id
       Tags:
         - Key: Name
           Value: !Sub '${ProjectName}-domain'
@@ -366,18 +568,22 @@ Resources:
   # ====================================================================
   UserProfile:
     Type: AWS::SageMaker::UserProfile
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     DependsOn: SpaceLifecycleConfig
     Properties:
       DomainId: !Ref SageMakerDomain
       UserProfileName: !Ref UserProfileName
       UserSettings:
-        ExecutionRole: !GetAtt SageMakerExecutionRole.Arn
+        ExecutionRole: !If
+          - CreateNewRole
+          - !GetAtt SageMakerExecutionRole.Arn
+          - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-SageMakerExecutionRole'
         JupyterLabAppSettings:
           LifecycleConfigArns:
             - !GetAtt SpaceLifecycleConfig.StudioLifecycleConfigArn
           DefaultResourceSpec:
             InstanceType: !Ref JupyterLabInstance
-            SageMakerImageArn: !Sub 'arn:aws:sagemaker:${AWS::Region}:081325390199:image/sagemaker-data-science-310-v1'
       Tags:
         - Key: Name
           Value: !Sub '${ProjectName}-user-profile'
@@ -387,102 +593,98 @@ Resources:
   # ====================================================================
   SpaceLifecycleConfig:
     Type: AWS::SageMaker::StudioLifecycleConfig
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       StudioLifecycleConfigName: !Sub '${ProjectName}-setup-script'
       StudioLifecycleConfigAppType: JupyterLab
-      StudioLifecycleConfigContent: !Base64
-        Fn::Sub: |
-          #!/bin/bash
-          set -e
+      StudioLifecycleConfigContent:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/bash
+            set -e
 
-          # Wait for Jupyter to be fully ready
-          sleep 10
+            # Wait for Jupyter to be fully ready
+            sleep 10
 
-          # Set up environment as the default notebook user
-          WORK_DIR="/home/sagemaker-user"
-          cd "$WORK_DIR"
+            # Set up environment as the default notebook user
+            WORK_DIR="/home/sagemaker-user"
+            cd "$WORK_DIR"
 
-          # Clone repository if not already present
-          if [ ! -d "sample-mlops-bestpractices" ]; then
-            echo "Cloning repository..."
-            git clone https://github.com/aws-samples/sample-mlops-bestpractices.git
-          fi
+            # Clone repository if not already present
+            if [ ! -d "sample-mlops-bestpractices" ]; then
+              echo "Cloning repository..."
+              git clone ${GitHubRepo}
+            fi
 
-          # Navigate to project directory
-          cd sample-mlops-bestpractices/sagemaker-automated-drift-and-trend-monitoring
+            # Navigate to project directory
+            cd sample-mlops-bestpractices/sagemaker-automated-drift-and-trend-monitoring
 
-          # Create .env file with CloudFormation outputs
-          echo "Creating .env file with CloudFormation outputs..."
-          cat > .env << 'EOF'
-          # AWS Configuration
-          AWS_DEFAULT_REGION=${AWS::Region}
+            # Create .env file with CloudFormation outputs
+            echo "Creating .env file with CloudFormation outputs..."
+            cat > .env << 'EOF'
+            # AWS Configuration
+            AWS_DEFAULT_REGION=${AWS::Region}
 
-          # SageMaker Configuration
-          SAGEMAKER_EXEC_ROLE=${SageMakerExecutionRole.Arn}
+            # SageMaker Configuration
+            SAGEMAKER_EXEC_ROLE=arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-SageMakerExecutionRole
+            SAGEMAKER_DOMAIN_ID=${SageMakerDomain}
 
-          # MLflow Configuration
-          MLFLOW_TRACKING_URI=${MLflowTrackingServer.TrackingServerArn}
+            # MLflow Configuration
+            MLFLOW_TRACKING_URI=${MLflowTrackingServer.TrackingServerArn}
 
-          # S3 Configuration
-          DATA_S3_BUCKET=${DataBucket}
+            # S3 Configuration
+            DATA_S3_BUCKET=${ProjectName}-data-${AWS::AccountId}
 
-          # Athena Configuration
-          ATHENA_DATABASE=fraud_detection
-          ATHENA_WORKGROUP=primary
+            # Project Configuration
+            PROJECT_NAME=${ProjectName}
+            EOF
 
-          # Auto-generated by CloudFormation stack: ${AWS::StackName}
-          # Stack creation time: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          EOF
+            # Set proper ownership
+            chown sagemaker-user:sagemaker-user .env
+            chmod 600 .env
 
-          # Set proper ownership
-          chown sagemaker-user:sagemaker-user .env
-          chmod 600 .env
+            # Create README with setup instructions
+            cat > CLOUDFORMATION_SETUP_COMPLETE.md << 'SETUPEOF'
+            # CloudFormation Setup Complete!
 
-          # Create a README for the user
-          cat > CLOUDFORMATION_SETUP_COMPLETE.md << 'EOF'
-          # CloudFormation Setup Complete! ✅
+            ## Environment Variables Configured
 
-          Your environment has been automatically configured. The following steps were completed:
+            Your .env file has been automatically created with all necessary configurations:
+            - AWS Region and SageMaker Execution Role
+            - MLflow Tracking Server URL
+            - S3 Data Bucket
 
-          1. ✅ Repository cloned to: `~/sample-mlops-bestpractices/sagemaker-automated-drift-and-trend-monitoring`
-          2. ✅ `.env` file created with all CloudFormation outputs
-          3. ✅ Environment variables configured:
-             - SAGEMAKER_EXEC_ROLE
-             - MLFLOW_TRACKING_URI
-             - DATA_S3_BUCKET
-             - AWS_DEFAULT_REGION
+            ## Next Steps
 
-          ## Next Steps
+            1. Open a terminal and verify the environment:
+               ```bash
+               cat .env
+               ```
 
-          Open the notebooks in order:
-          1. `notebooks/1_training_pipeline.ipynb` - Train the fraud detection model
-          2. `notebooks/2a_inference_monitoring.ipynb` - Set up monitoring
-          3. `notebooks/3_governance_dashboard.ipynb` - Create QuickSight dashboard
+            2. Install dependencies:
+               ```bash
+               pip install -r requirements.txt
+               ```
 
-          ## Verify Configuration
+            3. Run the notebooks in order:
+               - 01_data_preparation.ipynb
+               - 02_model_training.ipynb
+               - 03_inference_monitoring.ipynb
 
-          Run this in a notebook cell to verify:
-          ```python
-          from dotenv import load_dotenv
-          import os
+            ## MLflow Tracking Server
 
-          load_dotenv()
-          print(f"Region: {os.getenv('AWS_DEFAULT_REGION')}")
-          print(f"Exec Role: {os.getenv('SAGEMAKER_EXEC_ROLE')}")
-          print(f"MLflow: {os.getenv('MLFLOW_TRACKING_URI')}")
-          print(f"S3 Bucket: {os.getenv('DATA_S3_BUCKET')}")
-          ```
+            Your MLflow tracking server ARN:
+            ${MLflowTrackingServer.TrackingServerArn}
 
-          ## CloudFormation Stack
+            To get the MLflow UI URL, run:
+            aws sagemaker describe-mlflow-tracking-server --tracking-server-name ${ProjectName}-mlflow --query 'TrackingServerUrl' --output text
 
-          Stack Name: ${AWS::StackName}
-          Region: ${AWS::Region}
+            SETUPEOF
 
-          EOF
+            chown sagemaker-user:sagemaker-user CLOUDFORMATION_SETUP_COMPLETE.md
 
-          chown sagemaker-user:sagemaker-user CLOUDFORMATION_SETUP_COMPLETE.md
-
-          echo "Setup complete! Repository cloned and .env configured."
+            echo "Setup complete! Check CLOUDFORMATION_SETUP_COMPLETE.md for next steps."
       Tags:
         - Key: Name
           Value: !Sub '${ProjectName}-lifecycle-config'
@@ -492,12 +694,15 @@ Resources:
   # ====================================================================
   JupyterSpace:
     Type: AWS::SageMaker::Space
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     DependsOn:
+      - UserProfile
       - MLflowTrackingServer
       - SpaceLifecycleConfig
     Properties:
       DomainId: !Ref SageMakerDomain
-      SpaceName: !Sub '${ProjectName}-jupyter-space'
+      SpaceName: !Sub '${ProjectName}-jupyter-space-v2'
       OwnershipSettings:
         OwnerUserProfileName: !Ref UserProfileName
       SpaceSettings:
@@ -505,23 +710,29 @@ Resources:
         JupyterLabAppSettings:
           DefaultResourceSpec:
             InstanceType: !Ref JupyterLabInstance
-            SageMakerImageArn: !Sub 'arn:aws:sagemaker:${AWS::Region}:081325390199:image/sagemaker-data-science-310-v1'
             LifecycleConfigArn: !GetAtt SpaceLifecycleConfig.StudioLifecycleConfigArn
       SpaceSharingSettings:
         SharingType: Private
       Tags:
         - Key: Name
           Value: !Sub '${ProjectName}-jupyter-space'
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # ====================================================================
   # MLflow Tracking Server
   # ====================================================================
   MLflowTrackingServer:
     Type: AWS::SageMaker::MlflowTrackingServer
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       TrackingServerName: !Sub '${ProjectName}-mlflow'
-      ArtifactStoreUri: !Sub 's3://${DataBucket}/mlflow-artifacts'
-      RoleArn: !GetAtt SageMakerExecutionRole.Arn
+      ArtifactStoreUri: !Sub 's3://${ProjectName}-data-${AWS::AccountId}/mlflow-artifacts'
+      RoleArn: !If
+        - CreateNewRole
+        - !GetAtt SageMakerExecutionRole.Arn
+        - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-SageMakerExecutionRole'
       AutomaticModelRegistration: true
       WeeklyMaintenanceWindowStart: 'Sun:03:00'
       Tags:
@@ -529,42 +740,6 @@ Resources:
           Value: !Sub '${ProjectName}-mlflow'
 
 Outputs:
-  VPCId:
-    Description: VPC ID
-    Value: !Ref VPC
-    Export:
-      Name: !Sub '${AWS::StackName}-VPCId'
-
-  PrivateSubnet1Id:
-    Description: Private Subnet 1 ID
-    Value: !Ref PrivateSubnet1
-    Export:
-      Name: !Sub '${AWS::StackName}-PrivateSubnet1Id'
-
-  PrivateSubnet2Id:
-    Description: Private Subnet 2 ID
-    Value: !Ref PrivateSubnet2
-    Export:
-      Name: !Sub '${AWS::StackName}-PrivateSubnet2Id'
-
-  SecurityGroupId:
-    Description: Security Group ID
-    Value: !Ref SecurityGroup
-    Export:
-      Name: !Sub '${AWS::StackName}-SecurityGroupId'
-
-  DataBucketName:
-    Description: S3 Bucket for data storage
-    Value: !Ref DataBucket
-    Export:
-      Name: !Sub '${AWS::StackName}-DataBucket'
-
-  SageMakerExecutionRoleArn:
-    Description: SageMaker Execution Role ARN (use this in .env as SAGEMAKER_EXEC_ROLE)
-    Value: !GetAtt SageMakerExecutionRole.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-ExecutionRoleArn'
-
   SageMakerDomainId:
     Description: SageMaker Domain ID
     Value: !Ref SageMakerDomain
@@ -572,7 +747,7 @@ Outputs:
       Name: !Sub '${AWS::StackName}-DomainId'
 
   UserProfileName:
-    Description: User Profile Name
+    Description: SageMaker User Profile Name
     Value: !Ref UserProfileName
     Export:
       Name: !Sub '${AWS::StackName}-UserProfileName'
@@ -583,31 +758,48 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-JupyterSpaceName'
 
+  DataBucketName:
+    Description: S3 Data Bucket Name
+    Value: !If [CreateNewBucket, !Ref DataBucket, !Sub '${ProjectName}-data-${AWS::AccountId}']
+    Export:
+      Name: !Sub '${AWS::StackName}-DataBucket'
+
+  SageMakerExecutionRoleArn:
+    Description: SageMaker Execution Role ARN
+    Value: !If
+      - CreateNewRole
+      - !GetAtt SageMakerExecutionRole.Arn
+      - !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-SageMakerExecutionRole'
+    Export:
+      Name: !Sub '${AWS::StackName}-ExecutionRoleArn'
+
   MLflowTrackingServerArn:
-    Description: MLflow Tracking Server ARN (use this in .env as MLFLOW_TRACKING_URI)
+    Description: MLflow Tracking Server ARN
     Value: !GetAtt MLflowTrackingServer.TrackingServerArn
     Export:
       Name: !Sub '${AWS::StackName}-MLflowArn'
 
-  MLflowTrackingBrowserUrl:
-    Description: MLflow Browser URL for UI access
-    Value: !Sub 'https://${MLflowTrackingServer.TrackingServerArn}.mlflow.${AWS::Region}.sagemaker.aws/jupyter'
+  MLflowTrackingServerName:
+    Description: MLflow Tracking Server Name (use with describe-mlflow-tracking-server to get URL)
+    Value: !Sub '${ProjectName}-mlflow'
+    Export:
+      Name: !Sub '${AWS::StackName}-MLflowName'
+
+  GetMLflowUrlCommand:
+    Description: Command to get MLflow UI URL
+    Value: !Sub 'aws sagemaker describe-mlflow-tracking-server --tracking-server-name ${ProjectName}-mlflow --query TrackingServerUrl --output text --region ${AWS::Region}'
 
   SetupInstructions:
-    Description: Next steps to complete setup
+    Description: Setup Instructions
     Value: !Sub |
-      1. Copy these values to your .env file:
-         SAGEMAKER_EXEC_ROLE=${SageMakerExecutionRole.Arn}
-         MLFLOW_TRACKING_URI=${MLflowTrackingServer.TrackingServerArn}
-         DATA_S3_BUCKET=${DataBucket}
-         AWS_DEFAULT_REGION=${AWS::Region}
+      Stack created successfully!
 
-      2. Access JupyterLab:
-         - Go to SageMaker Console -> Domains -> ${ProjectName}-domain
-         - Select user profile: ${UserProfileName}
-         - Click "Launch" -> "Space: ${ProjectName}-jupyter-space"
+      1. Navigate to SageMaker Console: https://console.aws.amazon.com/sagemaker/home?region=${AWS::Region}#/domains
+      2. Click on Domain: ${ProjectName}-domain
+      3. Select User Profile: ${UserProfileName}
+      4. Go to Spaces and open: ${ProjectName}-jupyter-space
+      5. Click "Run Space" to start JupyterLab
+      6. Once JupyterLab loads, check CLOUDFORMATION_SETUP_COMPLETE.md for next steps
 
-      3. Clone repository and run notebooks:
-         git clone https://github.com/aws-samples/sample-mlops-bestpractices.git
-         cd sagemaker-automated-drift-and-trend-monitoring
-         Open: 1_training_pipeline.ipynb
+      Get MLflow UI URL:
+      aws sagemaker describe-mlflow-tracking-server --tracking-server-name ${ProjectName}-mlflow --query TrackingServerUrl --output text --region ${AWS::Region}
