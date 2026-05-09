@@ -4,8 +4,6 @@ Single-stack deployment of a ready-to-use SageMaker Studio environment for the a
 
 ## What the Stack Creates
 
-![Stack Timeline](Stack-timeline.png)
-
 The template (`sagemaker-mlflow-setup.yaml`) provisions:
 
 - **VPC** with two public subnets, Internet Gateway, route table, and security group
@@ -17,6 +15,18 @@ The template (`sagemaker-mlflow-setup.yaml`) provisions:
 - **Cleanup Lambdas** for S3 object cleanup, ENI cleanup, and SageMaker app cleanup so the stack deletes cleanly
 
 Policy names and role names are parameterized by `ProjectName`, so the same template can be deployed multiple times in the same account with different parameter values.
+
+### Resource Layout
+
+The following Infrastructure Composer view shows how the resources are wired together:
+
+![Resource Layout](cfn-infrastructure-composer.png)
+
+### Creation Timeline and Dependencies
+
+The diagram below shows the creation order and dependencies between resources:
+
+![Stack Timeline](Stack-timeline.png)
 
 ## Prerequisites
 
@@ -126,7 +136,8 @@ The ENI-cleanup and S3-cleanup Lambdas handle this, but if they ever time out, r
 | File | Purpose |
 |------|---------|
 | `sagemaker-mlflow-setup.yaml` | The CloudFormation template |
-| `Stack-timeline.png` | Visualisation of what the stack provisions |
+| `cfn-infrastructure-composer.png` | Infrastructure Composer view of the resource layout |
+| `Stack-timeline.png` | Creation timeline and dependency ordering of the stack resources |
 | `cleanup-stack.sh` | Clean deletion helper (stops apps and waits for ENIs before re-running delete) |
 | `force-delete-stack.sh` | Force-cleanup for a stuck `DELETE_FAILED` stack (empties S3 bucket, removes stuck ENIs, deletes subnets, retries delete with `--retain-resources`) |
 | `README.md` | This file |
