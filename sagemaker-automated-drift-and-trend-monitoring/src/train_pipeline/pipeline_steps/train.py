@@ -667,7 +667,8 @@ def log_to_mlflow(
             model_info = mlflow.xgboost.log_model(
                 model,
                 artifact_path="model",
-                registered_model_name=model_name
+                registered_model_name=model_name,
+                model_format="json"  # XGBoost 3.x requires JSON format
             )
 
             # Get the model version that was created

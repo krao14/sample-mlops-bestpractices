@@ -81,31 +81,45 @@ def setup_logging_command(args):
 
 
 def train_command(args):
-    """Run training."""
-    from src.train_pipeline.train import train
-
-    logger.info("Starting training...")
-
-    run_id, model = train(
-        training_mode=args.training_mode,
-        data_source=args.data_source,
-        data_path=args.data_path,
-        athena_table=args.athena_table,
-        athena_filter=args.athena_filter,
-        instance_type=args.instance_type,
-        experiment_name=args.experiment_name,
-    )
-
-    print(f"\n✓ Training completed successfully!")
-    print(f"  Run ID: {run_id}")
-    print(f"  Model saved to MLflow")
-
-    return 0
+    """Run training via SageMaker Pipeline."""
+    print("=" * 80)
+    print("Training via SageMaker Pipeline")
+    print("=" * 80)
+    print("\nStandalone training has been deprecated.")
+    print("All training must now go through the SageMaker Pipeline for consistency.")
+    print("\n📓 To train a model:")
+    print("  1. Open: notebooks/1_training_pipeline.ipynb")
+    print("  2. Run cells 13-18 to create/update pipeline and start training")
+    print("\nThe pipeline provides:")
+    print("  ✓ Reproducible training with version control")
+    print("  ✓ Automated preprocessing, training, and evaluation")
+    print("  ✓ MLflow experiment tracking")
+    print("  ✓ Model registration and deployment")
+    print("  ✓ JSON model format for XGBoost 3.x compatibility")
+    print("\n" + "=" * 80)
+    return 1
 
 
 def deploy_command(args):
-    """Run deployment."""
-    from src.train_pipeline.deploy import deploy
+    """Deploy via SageMaker Pipeline only."""
+    print("=" * 80)
+    print("Deployment via SageMaker Pipeline")
+    print("=" * 80)
+    print("\nDeployment is handled automatically by the SageMaker Pipeline.")
+    print("\n📓 To deploy a model:")
+    print("  1. Open: notebooks/1_training_pipeline.ipynb")
+    print("  2. Training pipeline automatically deploys after quality gates pass")
+    print("  3. Check cell 11: set 'include_deployment=True' (default)")
+    print("\nWhat the pipeline does:")
+    print("  ✓ Trains model with quality gates (ROC-AUC, PR-AUC thresholds)")
+    print("  ✓ Registers model in SageMaker Model Registry")
+    print("  ✓ Creates serverless endpoint with inference logging")
+    print("  ✓ Sets up SQS/Lambda for Athena logging")
+    print("  ✓ Tests endpoint and logs results to MLflow")
+    print("\nTo execute pipeline programmatically:")
+    print("  python main.py pipeline execute --pipeline-name fraud-detection-pipeline")
+    print("\n" + "=" * 80)
+    return 1
 
     logger.info("Starting deployment...")
 
@@ -230,20 +244,18 @@ def pipeline_command(args):
 
 def full_command(args):
     """Run full pipeline (train → deploy → test)."""
-    logger.info("Starting full pipeline...")
-
-    # Step 1: Train
-    print("\n" + "=" * 80)
-    print("STEP 1: TRAINING")
-    print("=" * 80 + "\n")
-
-    from src.train_pipeline.train import train
-
-    run_id, model = train(
-        training_mode=args.training_mode,
-        data_source=args.data_source,
-        instance_type=args.instance_type,
-    )
+    print("=" * 80)
+    print("Full Pipeline Command Deprecated")
+    print("=" * 80)
+    print("\nThe 'full' command has been deprecated.")
+    print("Please use the SageMaker Pipeline notebooks for end-to-end workflows.")
+    print("\n📓 To run the full pipeline:")
+    print("  1. Training: notebooks/1_training_pipeline.ipynb")
+    print("  2. Monitoring: notebooks/2a_inference_monitoring.ipynb")
+    print("  3. Dashboard: notebooks/3_governance_dashboard.ipynb")
+    print("\nThese notebooks provide better visibility and control.")
+    print("=" * 80)
+    return 1
 
     # Step 2: Deploy
     print("\n" + "=" * 80)
@@ -291,17 +303,15 @@ Examples:
   # Setup infrastructure
   python main.py setup --migrate-data
 
-  # Train model
-  python main.py train --training-mode local --data-source athena
-
-  # Deploy model
-  python main.py deploy --run-id abc123 --endpoint-name fraud-detector
-
   # Test endpoint
   python main.py test --endpoint-name fraud-detector --num-samples 50
 
-  # Run full pipeline
-  python main.py full --endpoint-name fraud-detector
+  # Execute pipeline (training + deployment)
+  python main.py pipeline execute --pipeline-name fraud-detection-pipeline
+
+Note:
+  Training and deployment are handled by SageMaker Pipelines.
+  Use notebooks/1_training_pipeline.ipynb for reproducible end-to-end workflows.
         """
     )
 
@@ -338,9 +348,12 @@ Examples:
     subparsers.add_parser('setup-logging', help='Setup SQS queue and Lambda for inference logging')
 
     # =========================================================================
-    # Train Command
+    # Train Command (DEPRECATED)
     # =========================================================================
-    train_parser = subparsers.add_parser('train', help='Train fraud detection model')
+    train_parser = subparsers.add_parser(
+        'train',
+        help='[DEPRECATED] Use notebooks/1_training_pipeline.ipynb instead'
+    )
     train_parser.add_argument(
         '--training-mode',
         choices=['local', 'sagemaker'],
@@ -377,9 +390,12 @@ Examples:
     )
 
     # =========================================================================
-    # Deploy Command
+    # Deploy Command (Pipeline Only)
     # =========================================================================
-    deploy_parser = subparsers.add_parser('deploy', help='Deploy model to SageMaker')
+    deploy_parser = subparsers.add_parser(
+        'deploy',
+        help='Deploy via pipeline (use notebooks/1_training_pipeline.ipynb)'
+    )
     deploy_parser.add_argument(
         '--run-id',
         required=True,
@@ -583,9 +599,12 @@ Examples:
     )
 
     # =========================================================================
-    # Full Command
+    # Full Command (DEPRECATED)
     # =========================================================================
-    full_parser = subparsers.add_parser('full', help='Run full pipeline (train → deploy → test)')
+    full_parser = subparsers.add_parser(
+        'full',
+        help='[DEPRECATED] Use pipeline notebooks instead'
+    )
     full_parser.add_argument(
         '--endpoint-name',
         required=True,

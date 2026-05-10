@@ -148,8 +148,23 @@ print(f"✅ S3 Bucket: {os.getenv('DATA_S3_BUCKET')}")
 - Create feature drift datasets, drift scores, and severity visualizations
 - Observe trends for feature drift, model drift, and data drift
 - Dashboard queries Athena tables directly (inference_responses, monitoring_responses)
-- Auto-refresh via EventBridge + Lambda (3 AM UTC daily)     
+- Auto-refresh via EventBridge + Lambda (3 AM UTC daily)
 
+### Model Explainability: SHAP Analysis (`6_shap_explainability.ipynb`)
+
+**SHAP (SHapley Additive exPlanations)** provides mathematical explanations for individual model predictions using game theory. This notebook generates:
+
+- **Global Feature Importance**: Which features drive fraud predictions across all samples
+- **Individual Explanations**: Why a specific transaction was flagged as fraud or approved
+- **Feature Interactions**: How features combine to influence predictions
+
+**Key Insights from Analysis**:
+
+- **Top 3 Fraud Indicators**: Account age (0.365), transaction velocity (0.294), online transactions (0.248)
+- **Trust Signals**: Established accounts (>180 days), normal velocity, recurring patterns
+- **Business Rules**: Apply stricter checks for new accounts and high-velocity transactions
+
+📊 **[View Complete SHAP Analysis Results](notebooks/shap_output/README.md)** - Includes visualized explanations of feature importance, individual predictions, and actionable business insights with all generated plots.
 
 # Introduction
 

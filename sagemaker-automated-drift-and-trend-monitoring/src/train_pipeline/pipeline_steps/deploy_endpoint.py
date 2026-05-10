@@ -4,7 +4,7 @@ Lambda function for deploying SageMaker endpoint in pipeline.
 This Lambda is invoked as a LambdaStep and:
 - Creates or updates SageMaker endpoint
 - Configures with Athena logging environment variables
-- Uses inference_handler.py for inference
+- Uses inference.py for inference (from pipeline_steps/)
 - Supports serverless inference configuration
 """
 

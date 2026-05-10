@@ -602,3 +602,13 @@ quicksight:
 
   # QuickSight service role (for Lake Formation permissions)
   service_role_name: aws-quicksight-service-role-v0
+
+# ---------------------------------------------------------------------------
+# SHAP Explainability Configuration
+# ---------------------------------------------------------------------------
+shap:
+  background_samples: 500           # Number of samples for SHAP baseline
+  max_display_features: 20          # Maximum features to display in plots
+  check_additivity: false           # Validate SHAP math (slower, for debugging)
+  random_state: 42                  # Seed for reproducible sampling
+  output_dir: "shap_output/"        # Directory for saving plots
