@@ -811,6 +811,7 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
+              # Control-plane: manage the tracking-server resource itself.
               - Effect: Allow
                 Action:
                   - 'sagemaker:CreateMlflowTrackingServer'
@@ -818,7 +819,21 @@ Resources:
                   - 'sagemaker:DeleteMlflowTrackingServer'
                   - 'sagemaker:DescribeMlflowTrackingServer'
                   - 'sagemaker:ListMlflowTrackingServers'
+                  - 'sagemaker:StartMlflowTrackingServer'
+                  - 'sagemaker:StopMlflowTrackingServer'
+                  # Needed by the Studio console to mint the signed URL
+                  # that opens the MLflow UI in a new tab.
+                  - 'sagemaker:CreatePresignedMlflowTrackingServerUrl'
                 Resource: '*'
+              # Data-plane: open the MLflow UI and read/write experiments,
+              # runs, metrics, params, tags, and registered models. This is
+              # the `sagemaker-mlflow:AccessUI` action surfaced in the
+              # "not authorized to perform" error, plus the REST actions
+              # mlflow-client calls against the server from notebooks.
+              - Effect: Allow
+                Action:
+                  - 'sagemaker-mlflow:*'
+                Resource: !Sub 'arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:mlflow-tracking-server/*'
         - PolicyName: !Sub '${ProjectName}-EventBridgeAccess'
           PolicyDocument:
             Version: '2012-10-17'
