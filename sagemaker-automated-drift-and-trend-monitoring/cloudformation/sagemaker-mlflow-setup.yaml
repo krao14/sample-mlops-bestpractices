@@ -1064,7 +1064,7 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
-      StudioLifecycleConfigName: !Sub '${ProjectName}-setup-script-v5'
+      StudioLifecycleConfigName: !Sub '${ProjectName}-setup-script-v7'
       StudioLifecycleConfigAppType: JupyterLab
       StudioLifecycleConfigContent:
         Fn::Base64:
@@ -1123,6 +1123,7 @@ Resources:
 
             # Athena Configuration
             ATHENA_OUTPUT_S3=s3://${ProjectName}-data-${AWS::AccountId}/athena-results/
+            ATHENA_DATABASE=fraud_detection
 
             # Project Configuration
             PROJECT_NAME=${ProjectName}
@@ -1137,9 +1138,9 @@ Resources:
             chown sagemaker-user:sagemaker-user .env
             chmod 600 .env
 
-            # Install dependencies
-            log "Installing Python dependencies..."
-            pip install .
+            # Install minimal dependencies (numpy, pandas, boto3 are pre-installed)
+            log "Installing minimal Python dependencies..."
+            pip install python-dotenv pyyaml
 
             # Generate synthetic datasets
             log "Generating synthetic datasets..."
@@ -1151,9 +1152,15 @@ Resources:
             mv data/generated_creditcard_drifted.csv data/creditcard_drifted.csv
             mv data/generated_creditcard_ground_truth.csv data/creditcard_ground_truth.csv
 
-            # Upload data to S3
-            log "Uploading data to S3..."
-            python -m src.setup.upload_data_to_s3
+            # Upload data to S3 (direct aws cli — avoids Python config loading issues)
+            DATA_BUCKET="${ProjectName}-data-${AWS::AccountId}"
+            S3_PREFIX="fraud-detection/data"
+
+            log "Uploading data to s3://$DATA_BUCKET/$S3_PREFIX/ ..."
+            aws s3 cp data/creditcard_predictions_final.csv "s3://$DATA_BUCKET/$S3_PREFIX/creditcard_predictions_final.csv"
+            aws s3 cp data/creditcard_ground_truth.csv "s3://$DATA_BUCKET/$S3_PREFIX/creditcard_ground_truth.csv"
+            aws s3 cp data/creditcard_drifted.csv "s3://$DATA_BUCKET/$S3_PREFIX/creditcard_drifted.csv"
+            log "S3 upload complete"
 
             # Setup Athena tables
             log "Setting up Athena tables..."
